@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Data (mounted as volumes)
+chroma_data/
+data/
+chat_history.db
+
+# Secrets
+.env
+
+# Tests & Dev
+test_api.py
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Frontend (built separately)
+frontend/
+
+# uv: keep pyproject.toml + uv.lock, exclude local venv cache
+.python-version

@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local configuration and runtime data
+.env
+.env.*
+!.env.example
+chroma_data/
+data/
+.pytest_cache/
+
+# Codegen leftovers
+_read_tools_src.txt
+_gen_data.py
