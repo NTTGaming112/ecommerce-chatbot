@@ -1,44 +1,42 @@
 # Simple RAG Service
 
-AI Customer Support multi-agent system: FastAPI + LangGraph agents + ChromaDB + Redis.
+Hệ thống AI Customer Support Multi-Agent kết hợp **Relational DB** (SQLite) và **Vector DB** (ChromaDB RAG).
 
-## Structure
-
-- `app/main.py` — FastAPI app, WebSocket chat, router mounting
-- `app/api/routers/` — REST endpoints (`/api/v1/chat`, `/api/v1/ask`, `/api/v1/ingest`, `/api/v1/health`, `/api/v1/tools`)
-- `app/agents/` — Orchestrator + domain agents (order, refund, billing, tech support, ...)
-- `app/services/` — Supervisor pipeline (LLM), retrieval (ChromaDB), memory (Redis + SQLite)
-- `app/tools/` — Tool registry with read/write tools and mock data
-- `frontend/` — React + Vite chat UI
-- `tests/` — pytest suite (workflows, memory, policy, prompts, schemas)
-
-## Quick start
+## 🚀 Khởi chạy nhanh (Docker)
 
 ```bash
-# with Docker
+# 1. Cấu hình biến môi trường
+cp .env.example .env    # Hoặc điền GOOGLE_API_KEY vào .env
+
+# 2. Khởi chạy toàn bộ hệ thống (Backend, Frontend, Redis)
 make up
-
-# local dev
-make infra-up     # start Redis
-make run-local    # uvicorn with reload on :8000
 ```
 
-API docs: <http://localhost:8000/docs> · Chat UI: <http://localhost:8000/chat>
+- **Frontend Web UI**: <http://localhost:3000>
+- **Backend API Docs**: <http://localhost:8000/docs>
 
-## Testing
+## 🛠️ Lệnh phổ biến (`Makefile`)
 
-```bash
-make test    # uv run pytest -q
-```
+| Lệnh | Chức năng |
+| :--- | :--- |
+| `make up` | Khởi chạy hệ thống trên Docker (chạy ngầm) |
+| `make down` | Dừng toàn bộ containers |
+| `make build` | Build lại toàn bộ images và khởi chạy |
+| `make logs` | Xem logs thời gian thực của backend |
+| `make test` | Chạy bộ kiểm thử tự động (`pytest`) |
+| `make dev` | Chạy backend cục bộ với hot-reload (`:8000`) |
+| `make sync-kb` | Đồng bộ Knowledge Base từ SQLite sang ChromaDB |
+| `make clean-redis` | Xóa sạch cache hội thoại trong Redis |
 
-## Knowledge base
+## 🏗️ Cấu trúc hệ thống
 
-Tài liệu RAG nằm trong `kb/` (chính sách, sản phẩm, hướng dẫn, FAQ). Nạp vào ChromaDB:
-
-```bash
-make seed-kb
-```
-
-## Configuration
-
-Copy `.env` values or set env vars — see `app/core/config.py` (`GOOGLE_API_KEY`, `REDIS_HOST`, `CHROMA_PERSIST_DIR`, ...).
+- `app/api/routers/` — REST endpoints (`chat`, `ecommerce`, `ingest`, `health`)
+- `app/services/` — 
+  - `database.py`: SQLite Relational DB (Khách hàng, Sản phẩm, Đơn hàng, Vận chuyển, Đổi trả)
+  - `retrieval_service.py`: ChromaDB Vector DB cho Knowledge Base
+  - `confirmation_service.py`: Luồng xác nhận tương tác cho hành động hủy đơn/trả hàng
+  - `llm_service.py` & `answer_agent.py`: Trả lời tự nhiên, grounding từ dữ liệu thực tế
+- `app/agents/` — Domain fetcher, phân loại ý định (router), hỗ trợ kỹ thuật
+- `frontend/` — Giao diện React + Tailwind CSS (5 tabs: Trợ lý AI, Đơn hàng, Sản phẩm, KB, Kỹ thuật)
+- `kb/` — Tài liệu Knowledge Base (Chính sách, Hướng dẫn, FAQ)
+- `tests/` — Bộ kiểm thử tự động toàn diện (`test_workflows.py`)
