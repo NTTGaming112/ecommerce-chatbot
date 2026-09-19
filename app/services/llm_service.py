@@ -52,6 +52,7 @@ class SupervisorState(TypedDict):
     sources: List[str]
     doc_count: int
     evidence_confidence: float
+    extra_context: str            # Real-world domain data (orders, products, billing...)
 
     # Answer Agent output
     answer: str
@@ -146,12 +147,17 @@ class LLMService:
             query=state["question"],
             search_mode=state["search_mode"],
         )
+        context = search_result["context"]
+        extra = state.get("extra_context", "").strip()
+        if extra:
+            context = f"{context}\n\n--- DỮ LIỆU THỰC TẾ ---\n{extra}".strip() if context else extra
+
         logger.info(
             f"[Supervisor] Search complete: {search_result['doc_count']} docs found, "
             f"mode={state['search_mode']}"
         )
         return {
-            "context": search_result["context"],
+            "context": context,
             "sources": search_result["sources"],
             "doc_count": search_result["doc_count"],
             "evidence_confidence": search_result["evidence_confidence"],
@@ -173,15 +179,22 @@ class LLMService:
     def _answer_node(self, state: SupervisorState) -> dict:
         """
         Gọi AnswerAgent để sinh câu trả lời cuối cùng.
-        Luôn được gọi, nhận context từ SearchAgent (nếu có).
+        Luôn được gọi, nhận context từ SearchAgent và Domain Fetcher.
         """
+        context = state.get("context", "")
+        extra = state.get("extra_context", "").strip()
+        if extra and extra not in context:
+            context = f"{context}\n\n--- DỮ LIỆU THỰC TẾ ---\n{extra}".strip() if context else extra
+
+        answer_mode = "deep" if context else state.get("answer_mode", "shallow")
+
         result = answer_agent.answer(
             question=state["question"],
-            context=state.get("context", ""),
+            context=context,
             history=state.get("history", []),
             summary=state.get("summary"),
             intent=state.get("intent", "general"),
-            answer_mode=state.get("answer_mode", "shallow"),
+            answer_mode=answer_mode,
             sources=state.get("sources", []),
             evidence_confidence=state.get("evidence_confidence", 0.0),
         )
@@ -247,6 +260,7 @@ class LLMService:
         session_id: str = "",
         summary: Optional[str] = None,
         search_mode: str = "auto",
+        extra_context: str = "",
     ) -> tuple:
         """
         Chạy multi-agent pipeline.
@@ -254,6 +268,8 @@ class LLMService:
         """
         if not self.workflow:
             raise RuntimeError("[Supervisor] LLM Workflow is not initialized properly")
+
+        logger.info("[Supervisor] ask start session_id=%s search_mode=%s question=%r", session_id, search_mode, question[:120])
 
         initial_state = SupervisorState(
             session_id=session_id,
@@ -268,11 +284,22 @@ class LLMService:
             sources=[],
             doc_count=0,
             evidence_confidence=0.0,
+            extra_context=extra_context,
             answer="",
             confidence=0.0,
         )
 
         result = self.workflow.invoke(initial_state)
+
+        logger.info(
+            "[Supervisor] ask done session_id=%s intent=%s search_mode=%s answer_mode=%s confidence=%.2f sources=%s",
+            session_id,
+            result.get("intent", "general"),
+            result.get("search_mode", "none"),
+            result.get("answer_mode", "shallow"),
+            float(result.get("confidence", 0.0)),
+            result.get("sources", []),
+        )
 
         return (
             result["answer"],

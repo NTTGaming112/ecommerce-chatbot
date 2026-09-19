@@ -166,22 +166,29 @@ class SearchAgent:
 
     def _retrieve_node(self, state: SearchState) -> dict:
         """Node: Tìm docs từ ChromaDB"""
+        logger.info("[SearchAgent] retrieve node start query=%r", state["query"][:120])
         docs = retrieve_docs(state["query"])
+        logger.info("[SearchAgent] retrieve node done docs=%s", len(docs))
         return {"retrieved_docs": docs}
 
     def _web_search_node(self, state: SearchState) -> dict:
         """Node: Tìm kiếm web"""
+        logger.info("[SearchAgent] web search node start query=%r", state["query"][:120])
         results = google_search(state["query"])
+        logger.info("[SearchAgent] web search node done results=%s", len(results))
         return {"web_results": results}
 
     def _hybrid_node(self, state: SearchState) -> dict:
         """Node: Kết hợp cả vector search và web search"""
+        logger.info("[SearchAgent] hybrid node start query=%r", state["query"][:120])
         docs = retrieve_docs(state["query"])
         web = google_search(state["query"])
+        logger.info("[SearchAgent] hybrid node done docs=%s web_results=%s", len(docs), len(web))
         return {"retrieved_docs": docs, "web_results": web}
 
     def _rerank_node(self, state: SearchState) -> dict:
         """Node: Rerank + tổng hợp tất cả results thành context"""
+        logger.info("[SearchAgent] rerank node start retrieved_docs=%s web_results=%s", len(state.get("retrieved_docs", [])), len(state.get("web_results", [])))
         query = state["query"]
         all_docs = []
 
@@ -222,6 +229,8 @@ class SearchAgent:
         final_context = "\n\n---\n\n".join(context_parts)
         sources = list(dict.fromkeys(doc.get("source", "unknown") for doc in selected_docs))
         evidence_confidence = max((doc.get("score", 0.0) for doc in selected_docs), default=0.0)
+
+        logger.info("[SearchAgent] rerank node done selected_docs=%s sources=%s confidence=%.2f", len(selected_docs), sources, evidence_confidence)
 
         return {
             "final_context": final_context,

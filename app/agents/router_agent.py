@@ -15,7 +15,9 @@ INTENT_PATTERNS = {
     ],
     "return_request": [
         r"tra\s+hang|doi\s+hang|tra\s+lai|exchange|return\s+item|want\s+to\s+return",
+        r"doi\s+don\s+hang|doi\s+san\s+pham|muon\s+doi|can\s+doi",
         r"muon\s+tra|khong\s+thich|doi\s+size|doi\s+mau|tra\s+hoac\s+doi",
+        r"doi\s+.*mau|doi\s+.*size|doi\s+.*san\s+pham",
         r"lam\s+the\s+nao.*tra|cach\s+tra|huong\s+dan\s+tra",
         r"return\s+how|how\s+to\s+return|how\s+do\s+i\s+return",
     ],
@@ -91,23 +93,6 @@ def extract_entities(message, intent):
 def determine_urgency(message, intent):
     msg = message.lower()
     if re.search(r"gap|urgent|cap\s+toc", msg): return "high"
-    if intent in ("tech_support","billing","refund"): return "high"
+    if intent in ("tech_support", "billing", "refund"): return "high"
     return "medium"
 
-def generate_task_plan(intent, entities):
-    plan = [{"agent":"CustomerInfoAgent","task":"verify_customer","depends_on":[]}]
-    if intent == "order_status":
-        plan += [{"agent":"OrderAgent","task":"check_order_status","depends_on":["verify_customer"]},{"agent":"KnowledgeBaseAgent","task":"generate_response","depends_on":["check_order_status"]}]
-    elif intent == "return_request":
-        plan += [{"agent":"OrderAgent","task":"check_return_eligibility","depends_on":["verify_customer"]},{"agent":"RefundAgent","task":"create_return_request","depends_on":["check_return_eligibility"],"confirmation":True},{"agent":"KnowledgeBaseAgent","task":"generate_response","depends_on":["create_return_request"]}]
-    elif intent == "refund":
-        plan += [{"agent":"OrderAgent","task":"search_orders","depends_on":["verify_customer"]},{"agent":"RefundAgent","task":"get_refund_status","depends_on":["search_orders"]},{"agent":"KnowledgeBaseAgent","task":"generate_response","depends_on":["get_refund_status"]}]
-    elif intent == "product_query":
-        plan += [{"agent":"ProductAgent","task":"search_products","depends_on":["verify_customer"]},{"agent":"KnowledgeBaseAgent","task":"generate_response","depends_on":["search_products"]}]
-    elif intent == "tech_support":
-        plan += [{"agent":"TechSupportAgent","task":"troubleshoot_issue","depends_on":["verify_customer"]},{"agent":"KnowledgeBaseAgent","task":"generate_response","depends_on":["troubleshoot_issue"]}]
-    elif intent == "billing":
-        plan += [{"agent":"BillingAgent","task":"check_payment","depends_on":["verify_customer"]},{"agent":"KnowledgeBaseAgent","task":"generate_response","depends_on":["check_payment"]}]
-    else:
-        plan += [{"agent":"KnowledgeBaseAgent","task":"generate_response","depends_on":["verify_customer"]}]
-    return plan

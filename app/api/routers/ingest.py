@@ -65,3 +65,15 @@ async def ingest_file(file: UploadFile = File(...)):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync-kb", summary="Đồng bộ toàn bộ bài viết KB (Chính sách, Hướng dẫn, FAQ) từ SQLite sang Vector DB")
+async def sync_knowledge_base():
+    """Đọc toàn bộ bài viết chính sách, quy định, hướng dẫn và FAQ từ SQLite và nạp vào ChromaDB."""
+    try:
+        res = retrieval_service.sync_kb_from_db()
+        return res
+    except Exception as e:
+        logger.error(f"Failed to sync KB to Vector DB: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

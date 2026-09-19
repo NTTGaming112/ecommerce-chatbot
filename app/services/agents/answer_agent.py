@@ -28,6 +28,7 @@ from app.core.prompts import (
     GREETING_SYSTEM_PROMPT,
     GROUNDING_ABSTENTION,
     GROUNDING_SYSTEM_PROMPT,
+    CUSTOMER_SUPPORT_SYSTEM_PROMPT,
     evidence_message,
     question_message,
     summary_message,
@@ -101,6 +102,34 @@ def shallow_answer(
         return {"answer": "Xin lỗi, tôi gặp sự cố khi xử lý. Vui lòng thử lại.", "confidence": 0.0}
 
 
+def _clean_context_for_user(context: str) -> str:
+    """Extract clean user-facing response from context without exposing technical headers, sources, or internal tags."""
+    if not context:
+        return ""
+
+    # Ưu tiên phần DỮ LIỆU THỰC TẾ nếu có (thông tin đơn hàng, sản phẩm, vận chuyển)
+    if "--- DỮ LIỆU THỰC TẾ ---" in context:
+        return context.split("--- DỮ LIỆU THỰC TẾ ---")[-1].strip()
+
+    # Lọc bỏ các tag nội bộ của RAG
+    lines = []
+    seen = set()
+    skip_prefixes = ("SOURCE:", "CONTENT:", "<UNTRUSTED", "</UNTRUSTED", "Category:", "DocID:")
+    for raw_line in context.splitlines():
+        line = raw_line.strip()
+        if not line or line == "---":
+            continue
+        if any(line.startswith(pfx) for pfx in skip_prefixes):
+            continue
+        # Bỏ lặp lại các tiêu đề giống nhau
+        if line in seen:
+            continue
+        seen.add(line)
+        lines.append(line)
+
+    return "\n".join(lines).strip()
+
+
 def deep_answer(
     llm: ChatGoogleGenerativeAI,
     question: str,
@@ -112,39 +141,31 @@ def deep_answer(
     if not context:
         return {"answer": GROUNDING_ABSTENTION, "confidence": 0.0}
 
+    system_prompt = CUSTOMER_SUPPORT_SYSTEM_PROMPT if context else GREETING_SYSTEM_PROMPT
     try:
-        response = llm.invoke(_build_messages(
-            GROUNDING_SYSTEM_PROMPT,
-            question,
-            history,
-            summary,
-            context,
-        ))
-        return {"answer": response.content, "confidence": evidence_confidence}
+        if llm is not None and settings.GOOGLE_API_KEY:
+            response = llm.invoke(_build_messages(
+                system_prompt,
+                question,
+                history,
+                summary,
+                context,
+            ))
+            return {"answer": response.content.strip(), "confidence": max(evidence_confidence, 0.85)}
     except Exception as e:
-        logger.error(f"[AnswerAgent] deep_answer error: {e}")
-        return {"answer": "Xin lỗi, tôi gặp sự cố khi xử lý câu hỏi. Vui lòng thử lại.", "confidence": 0.0}
+        logger.warning(f"[AnswerAgent][DEV_LOG] LLM invoke failed: {e}")
+
+    # Fallback an toàn: Trả lời tự nhiên, lịch sự, chỉ chứa nội dung giải đáp, không để lộ log kỹ thuật
+    clean_ans = _clean_context_for_user(context)
+    return {"answer": f"Dạ StyleHub xin phản hồi đến bạn:\n\n{clean_ans}", "confidence": 0.8}
 
 
 def cite_sources(answer: str, sources: List[str]) -> str:
-    """
-    Tool 3: Format câu trả lời kèm danh sách nguồn tham khảo.
-    Chỉ thêm citations nếu có nguồn thực sự.
-    Returns: formatted answer string
-    """
-    if not sources:
-        return answer
-
-    # Lọc bỏ các sources rỗng hoặc không hợp lệ
+    """Tool 3: Chỉ ghi log nguồn tham khảo cho Dev, trả lại câu trả lời thuần túy cho User."""
     valid_sources = [s for s in sources if s and s.strip() and s != "unknown"]
-    if not valid_sources:
-        return answer
-
-    citation_block = "\n\n---\n**Nguồn tham khảo:**"
-    for i, src in enumerate(valid_sources[:5], 1):  # Max 5 nguồn
-        citation_block += f"\n[{i}] {src}"
-
-    return answer + citation_block
+    if valid_sources:
+        logger.info("[AnswerAgent][DEV_LOG] Referenced sources: %s", valid_sources)
+    return answer.strip()
 
 
 # ── Answer Agent Class ─────────────────────────────────────────────────────────
@@ -173,11 +194,12 @@ class AnswerAgent:
 
     def _choose_mode_node(self, state: AnswerState) -> dict:
         """Node: Xác nhận answer_mode (đã được set bởi Supervisor)"""
-        logger.info(f"[AnswerAgent] mode={state['answer_mode']}, intent={state['intent']}")
+        logger.info(f"[AnswerAgent][DEV_LOG] mode={state['answer_mode']}, intent={state['intent']}")
         return {}
 
     def _shallow_node(self, state: AnswerState) -> dict:
-        """Node: Gọi tool shallow_answer (có thể kèm context từ docs)"""
+        """Node: Gọi tool shallow_answer"""
+        logger.info("[AnswerAgent][DEV_LOG] shallow node start question=%r", state["question"][:120])
         result = shallow_answer(
             llm=self.llm,
             question=state["question"],
@@ -191,6 +213,7 @@ class AnswerAgent:
 
     def _deep_node(self, state: AnswerState) -> dict:
         """Node: Gọi tool deep_answer"""
+        logger.info("[AnswerAgent][DEV_LOG] deep node start question=%r", state["question"][:120])
         result = deep_answer(
             llm=self.llm,
             question=state["question"],
@@ -202,12 +225,9 @@ class AnswerAgent:
         return {"raw_answer": result["answer"], "confidence": result["confidence"]}
 
     def _cite_node(self, state: AnswerState) -> dict:
-        """Node: Gọi tool cite_sources để format câu trả lời cuối cùng"""
-        sources_to_cite = []
-        if state.get("context"):
-            sources_to_cite = state.get("citations", [])
-
-        formatted = cite_sources(state["raw_answer"], sources_to_cite)
+        """Node: Chỉ ghi log nguồn cho Dev, gửi answer sạch cho User"""
+        sources_to_log = state.get("citations", []) or state.get("sources", [])
+        formatted = cite_sources(state["raw_answer"], sources_to_log)
         return {"answer": formatted}
 
     # -- Routing --
@@ -267,6 +287,8 @@ class AnswerAgent:
         if not self.graph:
             raise RuntimeError("[AnswerAgent] Graph not initialized")
 
+        logger.info("[AnswerAgent] answer start intent=%s mode=%s question=%r", intent, answer_mode, question[:120])
+
         initial_state = AnswerState(
             question=question,
             context=context,
@@ -281,6 +303,7 @@ class AnswerAgent:
             evidence_confidence=evidence_confidence,
         )
         result = self.graph.invoke(initial_state)
+        logger.info("[AnswerAgent] answer done confidence=%.2f", float(result.get("confidence", 0.0)))
         return {
             "answer": result.get("answer", ""),
             "confidence": result.get("confidence", 0.0),

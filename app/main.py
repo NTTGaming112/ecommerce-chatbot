@@ -5,12 +5,23 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from app.api.routers import ask, chat, health, ingest
+from app.api.routers import ask, chat, ecommerce, health, ingest
 from app.core.config import settings
 
-logging.basicConfig(level=logging.INFO)
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="AI Customer Support Multi-Agent System", version="2.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        from app.services.database import db_service
+        db_service.init_db()
+        from app.services.retrieval_service import retrieval_service
+        retrieval_service.sync_kb_from_db()
+    except Exception as e:
+        logging.warning("Startup KB/DB sync notice: %s", e)
+    yield
+
+app = FastAPI(title="AI Customer Support Multi-Agent System", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for router in (chat.router, ask.router, ingest.router, health.router):
+for router in (chat.router, ecommerce.router, ask.router, ingest.router, health.router):
     app.include_router(router)
 
 
@@ -72,19 +83,19 @@ async def websocket_chat(websocket: WebSocket, client_id: str):
             # Send typing indicator
             await ws_manager.send(client_id, {"type": "typing", "status": "processing"})
 
-            # Process message
-            from app.agents.orchestrator import process_message
-            state = process_message(customer_id, message)
+            # Process message with unified multi-agent chat pipeline
+            from app.api.routers.chat import chat as process_chat, ChatRequest
+            res = await process_chat(ChatRequest(customer_id=customer_id, message=message, session_id=client_id))
 
             # Send response
             await ws_manager.send(client_id, {
                 "type": "response",
-                "answer": state.get("final_response", ""),
-                "intent": state.get("intent", ""),
-                "confidence": state.get("confidence", 0),
-                "actions_taken": state.get("actions", []),
-                "entities": state.get("entities", {}),
-                "urgency": state.get("urgency", "medium"),
+                "answer": res.answer,
+                "intent": res.intent,
+                "confidence": res.confidence,
+                "actions_taken": res.actions_taken,
+                "entities": res.entities,
+                "urgency": res.urgency,
             })
     except WebSocketDisconnect:
         ws_manager.disconnect(client_id)
