@@ -154,3 +154,12 @@ lock: ## Resolve dependencies và cập nhật uv.lock (không install)
 .PHONY: lock-upgrade
 lock-upgrade: ## Upgrade tất cả packages lên phiên bản mới nhất
 	uv lock --upgrade
+
+# ── Knowledge Base ────────────────────────────────────────────
+.PHONY: seed-kb
+seed-kb: ## Nạp tài liệu trong kb/ vào ChromaDB (bỏ qua doc đã có)
+	uv run python scripts/seed_kb.py
+
+.PHONY: seed-kb-reset
+seed-kb-reset: ## Xóa collection và nạp lại toàn bộ tài liệu
+	uv run python scripts/seed_kb.py --reset

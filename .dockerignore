@@ -26,5 +26,9 @@ test_api.py
 # Frontend (built separately)
 frontend/
 
+# Local KB source (docs are ingested at deploy time, not shipped)
+kb/
+scripts/
+
 # uv: keep pyproject.toml + uv.lock, exclude local venv cache
 .python-version

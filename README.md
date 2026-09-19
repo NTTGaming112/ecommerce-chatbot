@@ -31,6 +31,14 @@ API docs: <http://localhost:8000/docs> · Chat UI: <http://localhost:8000/chat>
 make test    # uv run pytest -q
 ```
 
+## Knowledge base
+
+Tài liệu RAG nằm trong `kb/` (chính sách, sản phẩm, hướng dẫn, FAQ). Nạp vào ChromaDB:
+
+```bash
+make seed-kb
+```
+
 ## Configuration
 
 Copy `.env` values or set env vars — see `app/core/config.py` (`GOOGLE_API_KEY`, `REDIS_HOST`, `CHROMA_PERSIST_DIR`, ...).
