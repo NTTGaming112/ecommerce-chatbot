@@ -9,29 +9,67 @@ import sqlite3
 import json
 import logging
 import os
+import time
 from typing import List, Dict, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Try to import Redis, fallback to SQLite-only if unavailable
-try:
-    import redis
-    _redis_client = redis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=settings.REDIS_DB,
-        decode_responses=True,
-        socket_connect_timeout=1,
-        socket_timeout=1,
-    )
-    _redis_client.ping()
-    REDIS_AVAILABLE = True
-    logger.info("Redis connected successfully.")
-except Exception as e:
-    REDIS_AVAILABLE = False
-    _redis_client = None
-    logger.warning(f"Redis not available, falling back to SQLite-only mode: {e}")
+_redis_client = None
+REDIS_AVAILABLE = False
+_REDIS_RETRY_AFTER_SECONDS = 60.0
+_next_redis_retry_at = 0.0
+
+
+def _connect_redis(max_attempts: int = 5, initial_delay: float = 1.0):
+    """Best-effort Redis connection with retries to avoid startup races."""
+    try:
+        import redis
+    except Exception as e:
+        logger.warning("Redis package not available, using SQLite-only mode: %s", e)
+        return None
+
+    delay = initial_delay
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client = redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB,
+                decode_responses=True,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
+            client.ping()
+            logger.info("Redis connected successfully on attempt %s.", attempt)
+            return client
+        except Exception as e:
+            last_error = e
+            if attempt < max_attempts:
+                time.sleep(delay)
+                delay = min(delay * 2, 5.0)
+
+    logger.warning("Redis not available, falling back to SQLite-only mode: %s", last_error)
+    return None
+
+
+def _refresh_redis_state():
+    global _redis_client, REDIS_AVAILABLE, _next_redis_retry_at
+    if REDIS_AVAILABLE or _redis_client is not None:
+        return
+
+    now = time.time()
+    if now < _next_redis_retry_at:
+        return
+
+    _redis_client = _connect_redis()
+    REDIS_AVAILABLE = _redis_client is not None
+    if not REDIS_AVAILABLE:
+        _next_redis_retry_at = now + _REDIS_RETRY_AFTER_SECONDS
+
+
+_refresh_redis_state()
 
 
 class MemoryService:
@@ -66,6 +104,7 @@ class MemoryService:
         return f"session:{session_id}:summary"
 
     def _get_redis_buffer(self, session_id: str) -> List[Dict]:
+        _refresh_redis_state()
         if not REDIS_AVAILABLE:
             return []
         try:
@@ -76,6 +115,7 @@ class MemoryService:
             return []
 
     def _append_redis_buffer(self, session_id: str, role: str, content: str):
+        _refresh_redis_state()
         if not REDIS_AVAILABLE:
             return
         try:
@@ -87,6 +127,7 @@ class MemoryService:
             logger.error(f"Redis append_buffer error: {e}")
 
     def _get_redis_summary(self, session_id: str) -> Optional[str]:
+        _refresh_redis_state()
         if not REDIS_AVAILABLE:
             return None
         try:
@@ -96,6 +137,7 @@ class MemoryService:
             return None
 
     def _set_redis_summary(self, session_id: str, summary: str):
+        _refresh_redis_state()
         if not REDIS_AVAILABLE:
             return
         try:
@@ -106,6 +148,7 @@ class MemoryService:
 
     def _trim_redis_buffer(self, session_id: str, keep_last: int = 2):
         """Keep only the last N messages in buffer after summarization"""
+        _refresh_redis_state()
         if not REDIS_AVAILABLE:
             return
         try:
@@ -189,6 +232,7 @@ class MemoryService:
 
     def clear_history(self, session_id: str):
         """Clear all history for a session (Redis + SQLite)"""
+        _refresh_redis_state()
         if REDIS_AVAILABLE:
             try:
                 _redis_client.delete(
@@ -204,6 +248,7 @@ class MemoryService:
             conn.commit()
 
     def health_check(self) -> Dict:
+        _refresh_redis_state()
         sqlite_ok = False
         try:
             with sqlite3.connect(self.db_path) as conn:

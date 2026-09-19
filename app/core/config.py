@@ -1,3 +1,4 @@
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     MIN_RETRIEVAL_SCORE: float = 0.45
     MAX_CONTEXT_CHARS: int = 12_000
     MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
 
     # Redis
     REDIS_HOST: str = "localhost"
